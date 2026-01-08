@@ -8,9 +8,8 @@ import traceback
 import hashlib
 import time
 
-# Google Sheets
-import gspread
-from google.oauth2.service_account import Credentials
+# NOTE: gspread / google-auth imports are deferred inside get_gsheet_client()
+# to avoid ModuleNotFoundError at import time if the packages aren't installed.
 
 # ---------- Streamlit config ----------
 
@@ -37,9 +36,24 @@ if "last_import_hash" not in st.session_state:
 
 def get_gsheet_client():
     """
-    Create a gspread client from a service account stored in st.secrets["gcp_service_account"].
-    The secret may be a dict/object (preferred) or a JSON string.
+    Create and return a gspread client using service account credentials stored
+    in st.secrets['gcp_service_account'].
+
+    Imports gspread and google oauth libs here so the app can still load
+    when those dependencies are not installed. If missing, show a helpful
+    Streamlit message and raise.
     """
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except Exception as exc:
+        st.error(
+            "Google Sheets support requires extra Python packages that are not installed."
+        )
+        st.info("Add the following to requirements.txt (or pip install locally):")
+        st.code("gspread\ngoogle-auth\nopenpyxl\nxlrd", language="text")
+        raise RuntimeError("gspread / google-auth not installed") from exc
+
     if "gcp_service_account" not in st.secrets:
         raise RuntimeError("Missing Google service account in Streamlit secrets (gcp_service_account).")
 
@@ -58,10 +72,6 @@ def get_gsheet_client():
     return gspread.authorize(creds)
 
 def extract_spreadsheet_id(value: str) -> str:
-    """
-    Accept either a full Google Sheets URL or just the spreadsheet ID.
-    Returns empty string when input is falsy.
-    """
     if not value:
         return ""
     value = value.strip()
@@ -70,22 +80,16 @@ def extract_spreadsheet_id(value: str) -> str:
     return value
 
 def append_dataframe_to_sheet(client, spreadsheet_id, df, worksheet_name="Sheet1"):
-    """
-    Append DataFrame rows to worksheet. If worksheet does not exist it is created.
-    If sheet is empty, headers are written first.
-    """
     sh = client.open_by_key(spreadsheet_id)
     try:
         ws = sh.worksheet(worksheet_name)
-    except gspread.WorksheetNotFound:
-        # gspread expects integers for rows/cols
+    except Exception:  # gspread.WorksheetNotFound or similar
         ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
 
     existing = ws.get_all_values()
     rows = df.values.tolist()
 
     if not existing:
-        # Prepend header row
         ws.append_rows([df.columns.tolist()] + rows, value_input_option="USER_ENTERED")
     else:
         ws.append_rows(rows, value_input_option="USER_ENTERED")
@@ -95,24 +99,19 @@ def hash_bytes(data: bytes) -> str:
 
 @st.cache_data(show_spinner=False)
 def load_dataframe_cached(file_bytes: bytes, filename: str) -> pd.DataFrame:
-    """
-    Load bytes into a pandas DataFrame.
-    Uses filename extension when available; otherwise tries CSV then Excel as fallback.
-    """
     bio = BytesIO(file_bytes)
     name_lower = (filename or "").lower()
 
-    # Try to use extension if present
+    # Try to use extension if available
     try:
         if name_lower.endswith(".csv"):
             return pd.read_csv(bio)
         if name_lower.endswith((".xls", ".xlsx")):
             return pd.read_excel(bio)
     except Exception:
-        # Fall through to more forgiving attempts below
         pass
 
-    # Fallback attempts
+    # Fallback: try CSV then Excel
     bio.seek(0)
     try:
         return pd.read_csv(bio)
@@ -121,11 +120,6 @@ def load_dataframe_cached(file_bytes: bytes, filename: str) -> pd.DataFrame:
         return pd.read_excel(bio)
 
 def normalize_and_validate(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize incoming DataFrame to columns: Name, Station, Timestamp.
-    Accepts case-insensitive column names for Name/Station/Timestamp.
-    Raises ValueError if Name or Station columns are missing.
-    """
     lower_cols = {c.lower(): c for c in df.columns}
     if "name" not in lower_cols or "station" not in lower_cols:
         raise ValueError(f"Required columns missing. Found: {list(df.columns)}")
@@ -135,14 +129,12 @@ def normalize_and_validate(df: pd.DataFrame) -> pd.DataFrame:
         lower_cols["station"]: "Station",
     })
 
-    # Normalize Timestamp if present case-insensitively
     if "timestamp" in lower_cols:
         df = df.rename(columns={lower_cols["timestamp"]: "Timestamp"})
 
     if "Timestamp" not in df.columns:
         df["Timestamp"] = datetime.datetime.now().isoformat(sep=" ", timespec="seconds")
 
-    # Ensure only the expected columns are returned in a stable order
     return df[["Name", "Station", "Timestamp"]]
 
 # ---------- Registration form ----------
