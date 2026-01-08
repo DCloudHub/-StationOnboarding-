@@ -1,0 +1,2 @@
+# Create config directory
+mkdir -p .streamlit
