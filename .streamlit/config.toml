@@ -1,0 +1,10 @@
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+
+# Tell Streamlit which file is the main app
+[browser]
+serverAddress = "0.0.0.0"
+gatherUsageStats = false
