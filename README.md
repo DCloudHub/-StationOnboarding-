@@ -1,4 +1,3 @@
-# -StationOnboarding-
 # ⛽ Station Capture System
 
 A Streamlit web application for generating and managing location capture links for filling stations.
