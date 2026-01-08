@@ -4,6 +4,8 @@ import requests
 from io import BytesIO
 import datetime
 import traceback
+import openpyxl
+
 
 # Google Sheets auth
 import gspread
