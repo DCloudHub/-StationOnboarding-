@@ -1,2 +1,6 @@
+gspread
+google-auth
+openpyxl
+xlrd
 streamlit==1.28.0
 pandas==2.1.3
