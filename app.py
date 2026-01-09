@@ -988,7 +988,7 @@ else:
 st.markdown("---")
 st.markdown(f"""
 <div class="footer">
-    <p>🇳🇬 Station Onboarding System v{0.0.1} | NDPR Compliant</p>
+    <p>🇳🇬 Station Onboarding System v{0,0,1} | NDPR Compliant</p>
     <p>MIT Licensed © 2026 | For support: support@yourcompany.ng</p>
     <p>Total submissions this session: {st.session_state.submission_count}</p>
 </div>
