@@ -294,8 +294,8 @@ with st.form("client_info"):
         client_id = st.text_input("Client Reference ID", placeholder="Optional")
     
     # Product selection
-    products = ["Product A - $99", "Product B - $149", "Product C - $199", "Custom Package"]
-    selected_product = st.selectbox("Select Product *", products)
+    Region = ["North Central", "North West", "North East", "South South", "South East", "South West"]
+    selected_Region = st.selectbox("Select Region *", Region)
     
     notes = st.text_area("Additional Notes", placeholder="Any special requirements or notes...")
     
