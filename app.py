@@ -8,7 +8,6 @@ Ensure compliance with local privacy laws (GDPR, CCPA, etc.).
 """
 
 import streamlit as st
-from streamlit_js_eval import streamlit_js_eval, get_geolocation
 import json
 import base64
 from datetime import datetime
@@ -16,6 +15,7 @@ import pandas as pd
 import os
 from PIL import Image
 import io
+import time
 
 # Page configuration
 st.set_page_config(
@@ -107,6 +107,75 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# JavaScript for geolocation
+def get_location_js():
+    """JavaScript to get geolocation"""
+    js_code = """
+    <script>
+    function getLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    // Send location data back to Streamlit
+                    const data = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    // Create a hidden element with the data
+                    const elem = document.createElement('div');
+                    elem.id = 'locationData';
+                    elem.innerText = JSON.stringify(data);
+                    document.body.appendChild(elem);
+                    
+                    // Trigger Streamlit to read the data
+                    const event = new Event('locationCaptured');
+                    document.dispatchEvent(event);
+                },
+                function(error) {
+                    // Error handling
+                    const errorData = {
+                        error: true,
+                        code: error.code,
+                        message: error.message
+                    };
+                    const elem = document.createElement('div');
+                    elem.id = 'locationData';
+                    elem.innerText = JSON.stringify(errorData);
+                    document.body.appendChild(elem);
+                    
+                    const event = new Event('locationCaptured');
+                    document.dispatchEvent(event);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        } else {
+            const errorData = {
+                error: true,
+                message: "Geolocation is not supported by this browser."
+            };
+            const elem = document.createElement('div');
+            elem.id = 'locationData';
+            elem.innerText = JSON.stringify(errorData);
+            document.body.appendChild(elem);
+            
+            const event = new Event('locationCaptured');
+            document.dispatchEvent(event);
+        }
+    }
+    
+    // Run on page load if needed
+    // getLocation();
+    </script>
+    """
+    return js_code
 
 # Header
 st.markdown('<h1 class="main-header">📍 Client Onboarding System</h1>', unsafe_allow_html=True)
@@ -280,61 +349,122 @@ st.warning("""
 - Click 'Get My Location' to capture GPS coordinates
 - Ensure location services are enabled on your device
 - You may need to allow location access in browser permissions
+- If automatic location fails, use manual entry below
 """)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Get location button
+# Inject JavaScript for geolocation
+st.components.v1.html(get_location_js(), height=0)
+
+# Location capture button
 if st.button("📍 Get My Current Location", key="get_location"):
-    with st.spinner("Getting your location..."):
+    # Inject JavaScript to trigger geolocation
+    trigger_js = """
+    <script>
+    getLocation();
+    
+    // Poll for location data
+    function checkForLocationData() {
+        const elem = document.getElementById('locationData');
+        if (elem) {
+            const data = JSON.parse(elem.innerText);
+            // Send to Streamlit via URL parameters (simplified approach)
+            window.location.href = window.location.href.split('?')[0] + '?location=' + encodeURIComponent(elem.innerText);
+        } else {
+            setTimeout(checkForLocationData, 500);
+        }
+    }
+    checkForLocationData();
+    </script>
+    """
+    
+    st.components.v1.html(trigger_js, height=0)
+    
+    # Check for location data in URL
+    query_params = st.query_params
+    if 'location' in query_params:
         try:
-            # Using streamlit_js_eval to get geolocation
-            location = get_geolocation()
+            location_data = json.loads(query_params['location'])
             
-            if location and 'coords' in location:
+            if 'error' in location_data and location_data['error']:
+                st.error(f"Location error: {location_data.get('message', 'Unknown error')}")
+            else:
                 st.session_state.location_data = {
-                    'latitude': location['coords']['latitude'],
-                    'longitude': location['coords']['longitude'],
-                    'accuracy': location['coords']['accuracy'],
-                    'timestamp': datetime.now().isoformat()
+                    'latitude': location_data['latitude'],
+                    'longitude': location_data['longitude'],
+                    'accuracy': location_data.get('accuracy', 'Unknown'),
+                    'timestamp': location_data.get('timestamp', datetime.now().isoformat()),
+                    'source': 'gps'
                 }
                 
                 # Display location data
                 st.markdown('<div class="data-box">', unsafe_allow_html=True)
                 st.success("✅ Location captured successfully!")
-                st.metric("Latitude", f"{location['coords']['latitude']:.6f}")
-                st.metric("Longitude", f"{location['coords']['longitude']:.6f}")
-                st.metric("Accuracy", f"±{location['coords']['accuracy']:.1f} meters")
+                st.metric("Latitude", f"{location_data['latitude']:.6f}")
+                st.metric("Longitude", f"{location_data['longitude']:.6f}")
+                st.metric("Accuracy", f"±{location_data.get('accuracy', 'Unknown'):.1f} meters")
                 
                 # Show map preview
                 map_data = pd.DataFrame({
-                    'lat': [location['coords']['latitude']],
-                    'lon': [location['coords']['longitude']]
+                    'lat': [location_data['latitude']],
+                    'lon': [location_data['longitude']]
                 })
                 st.map(map_data, zoom=14)
                 st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.error("⚠️ Could not retrieve location. Please ensure location services are enabled.")
+                
+                # Clear the query parameter
+                del st.query_params['location']
                 
         except Exception as e:
-            st.error(f"Error getting location: {str(e)}")
-            st.info("If location capture fails, you can manually enter coordinates below:")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                manual_lat = st.number_input("Latitude", format="%.6f")
-            with col2:
-                manual_lon = st.number_input("Longitude", format="%.6f")
-            
-            if manual_lat and manual_lon:
-                if st.button("Use Manual Coordinates"):
-                    st.session_state.location_data = {
-                        'latitude': manual_lat,
-                        'longitude': manual_lon,
-                        'accuracy': None,
-                        'timestamp': datetime.now().isoformat(),
-                        'source': 'manual'
-                    }
-                    st.success("Manual coordinates saved!")
+            st.error(f"Error processing location: {str(e)}")
+    else:
+        # Show manual entry option if automatic fails
+        st.info("If location capture doesn't work automatically, please use manual entry below:")
+    
+    # Manual location entry as fallback
+    with st.expander("📝 Manual Location Entry", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            manual_lat = st.number_input("Latitude", format="%.6f", value=0.0, key="manual_lat")
+        with col2:
+            manual_lon = st.number_input("Longitude", format="%.6f", value=0.0, key="manual_lon")
+        
+        location_source = st.selectbox("Location Source", 
+                                     ["GPS - Automatic", "Manually Entered", "Selected from Map"])
+        
+        if st.button("💾 Save Manual Location"):
+            if manual_lat != 0.0 and manual_lon != 0.0:
+                st.session_state.location_data = {
+                    'latitude': manual_lat,
+                    'longitude': manual_lon,
+                    'accuracy': None,
+                    'timestamp': datetime.now().isoformat(),
+                    'source': location_source
+                }
+                st.success("Manual location saved successfully!")
+            else:
+                st.error("Please enter valid coordinates (not 0,0)")
+
+# Display current location if captured
+if st.session_state.location_data:
+    st.markdown('<div class="data-box">', unsafe_allow_html=True)
+    st.subheader("📍 Current Location Data")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Latitude", f"{st.session_state.location_data['latitude']:.6f}")
+    with col2:
+        st.metric("Longitude", f"{st.session_state.location_data['longitude']:.6f}")
+    
+    st.caption(f"Source: {st.session_state.location_data.get('source', 'Unknown')} | "
+               f"Captured: {st.session_state.location_data['timestamp'][:19]}")
+    
+    # Show on map
+    map_data = pd.DataFrame({
+        'lat': [st.session_state.location_data['latitude']],
+        'lon': [st.session_state.location_data['longitude']]
+    })
+    st.map(map_data, zoom=14)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Final Submission
 st.markdown("---")
@@ -363,21 +493,24 @@ if st.button("🚀 Complete Onboarding", type="primary"):
             'photo_captured': True,
             'location': st.session_state.location_data,
             'submission_id': f"SUB-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-            'app_version': APP_VERSION
+            'app_version': APP_VERSION,
+            'consent_timestamp': datetime.now().isoformat()
         }
         
         # Display success message
         st.balloons()
-        st.success("""
+        st.success(f"""
         🎉 **Onboarding Complete!**
         
-        **Next Steps:**
-        1. You will receive a confirmation email
-        2. Our team will verify your information
-        3. Service delivery will be scheduled
+        **Submission ID:** {final_data['submission_id']}
         
-        **Reference ID:** {}
-        """.format(final_data['submission_id']))
+        **Next Steps:**
+        1. You will receive a confirmation email at {final_data['email']}
+        2. Our team will verify your information within 24 hours
+        3. Service delivery will be scheduled based on your location
+        
+        **Estimated Service Area:** {final_data['location']['latitude']:.4f}, {final_data['location']['longitude']:.4f}
+        """)
         
         # Display summary
         st.markdown("### 📋 Submission Summary")
@@ -388,46 +521,75 @@ if st.button("🚀 Complete Onboarding", type="primary"):
         with col2:
             st.metric("Product", final_data['product'].split(' - ')[0])
         with col3:
-            st.metric("Location Captured", "✅")
+            st.metric("Status", "Submitted")
         
         # Data preview (in production, this would save to database)
         with st.expander("View Collected Data (Preview)"):
-            st.json(final_data, expanded=False)
+            # Don't show full data in production - this is just for demo
+            preview_data = {
+                'submission_id': final_data['submission_id'],
+                'client_name': final_data['full_name'],
+                'email': final_data['email'],
+                'product': final_data['product'],
+                'location': final_data['location'],
+                'timestamp': final_data['timestamp']
+            }
+            st.json(preview_data, expanded=False)
             
-            # Create download option
-            json_str = json.dumps(final_data, indent=2)
+            # Create download option (in production, this would be secure)
+            json_str = json.dumps(preview_data, indent=2)
             b64 = base64.b64encode(json_str.encode()).decode()
-            href = f'<a href="data:application/json;base64,{b64}" download="onboarding_data_{final_data["submission_id"]}.json">📥 Download Data (JSON)</a>'
+            href = f'<a href="data:application/json;base64,{b64}" download="onboarding_data_{final_data["submission_id"]}.json">📥 Download Data Summary (JSON)</a>'
             st.markdown(href, unsafe_allow_html=True)
         
-        # Reset for next submission (except consent)
-        st.session_state.photo_captured = None
-        st.session_state.location_data = None
-        st.session_state.client_data = {}
+        # In production: Save to database here
+        st.info("""
+        **Production Note:** In a production environment, this data would be:
+        - Encrypted and saved to secure database
+        - Sent to your CRM system
+        - Processed for service scheduling
+        - Accessed only by authorized personnel
+        """)
+        
+        # Increment submission count
         st.session_state.submission_count += 1
         
         # Show reset option
-        if st.button("➕ Start New Onboarding"):
+        if st.button("➕ Start New Client Onboarding"):
+            # Reset only specific fields, keep consent
+            st.session_state.photo_captured = None
+            st.session_state.location_data = None
+            st.session_state.client_data = {}
             st.rerun()
 
-# Admin/Privacy Section (hidden by default)
+# Admin/Privacy Section
 with st.expander("🔒 Privacy & Data Management"):
     st.markdown("""
     ### Data Management
     *All data is handled in compliance with privacy regulations.*
     
-    **Your Rights:**
+    **Data Retention Policy:**
+    - Client information: 7 years (legal requirement)
+    - Location data: 2 years (service optimization)
+    - Photos: 1 year (verification purposes)
+    
+    **Your Rights Under GDPR/CCPA:**
     - Right to access your data
     - Right to rectification
-    - Right to erasure
+    - Right to erasure ("right to be forgotten")
+    - Right to restrict processing
     - Right to data portability
+    - Right to object to processing
     
-    **Contact Privacy Officer:** privacy@yourcompany.com
+    **Contact Our Data Protection Officer:** 
+    📧 privacy@yourcompany.com
+    📞 [Privacy Office Phone]
     """)
     
-    if st.button("🚫 Revoke My Consent (Reset Session)"):
+    if st.button("🚫 Revoke My Consent (Clear All Data)"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
+        st.success("All session data cleared. Consent revoked.")
         st.rerun()
 
 # Footer
@@ -435,7 +597,8 @@ st.markdown("---")
 st.markdown(f"""
 <div class="footer">
     <p>App Version {APP_VERSION} | MIT Licensed © 2024</p>
-    <p>For support: support@yourcompany.com | Phone: [Support Number]</p>
-    <p>Total submissions this session: {st.session_state.submission_count}</p>
+    <p>For technical support: support@yourcompany.com | Phone: [Support Number]</p>
+    <p>Submissions this session: {st.session_state.submission_count}</p>
+    <p><small>This application uses browser geolocation API. Accuracy depends on device capabilities.</small></p>
 </div>
 """, unsafe_allow_html=True)
