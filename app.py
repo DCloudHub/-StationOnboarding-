@@ -1,7 +1,7 @@
 """
 Streamlit Camera & Geolocation App with Nigerian Regions
 MIT License - For production use by registered businesses
-Copyright (c) 2024 [Your IT Company Name]
+Copyright (c) 2026 [GT Solutions LTD]
 
 This app captures photos with geolocation data during client onboarding.
 Ensure compliance with Nigeria Data Protection Regulation (NDPR).
@@ -30,7 +30,7 @@ st.set_page_config(
 
 # Constants
 APP_VERSION = "2.0.0"
-PRIVACY_POLICY_URL = "https://yourcompany.com/privacy"
+PRIVACY_POLICY_URL = "https://.com/privacy"
 TERMS_URL = "https://yourcompany.com/terms"
 NIGERIA_TZ = pytz.timezone('Africa/Lagos')
 
