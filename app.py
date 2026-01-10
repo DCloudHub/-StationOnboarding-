@@ -337,68 +337,74 @@ else:
             else:
                 st.error("⚠️ You must give your consent to proceed with registration")
     
-    # Step 2: Information
-    elif st.session_state.current_step == 2:
-        st.markdown("### Step 2: Personal Information")
-        
-        with st.form("info_form"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                name = st.text_input("Full Name *", placeholder="Enter your full name")
-                email = st.text_input("Email Address *", placeholder="example@email.com")
-            
-            with col2:
-                phone = st.text_input("Phone Number *", placeholder="08012345678")
-                zone = st.selectbox("Geopolitical Zone *", 
-                                   list(NIGERIAN_REGIONS.keys()),
-                                   index=None,
-                                   placeholder="Select your zone")
-            
-            if zone:
-                state = st.selectbox("State *", 
-                                    NIGERIAN_REGIONS[zone],
-                                    index=None,
-                                    placeholder="Select your state")
-            else:
-                state = None
-            
-            if state:
-                lga = st.text_input("Local Government Area (LGA) *", 
-                                   placeholder="Enter your LGA")
-                address = st.text_area("Detailed Address (Optional)", 
-                                      placeholder="House number, street, area...",
-                                      height=100)
-            
-            notes = st.text_area("Additional Information (Optional)", 
-                               placeholder="Any special requirements or notes...")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                back = st.form_submit_button("← Back to Consent")
-            with col_btn2:
-                next_btn = st.form_submit_button("Next: Take Photo →", type="primary")
-            
-            if back:
-                st.session_state.current_step = 1
+   elif st.session_state.current_step == 2:
+    st.markdown("### Step 2: Personal Information")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        name = st.text_input("Full Name *", placeholder="Enter your full name")
+        email = st.text_input("Email Address *", placeholder="example@email.com")
+
+    with col2:
+        phone = st.text_input("Phone Number *", placeholder="08012345678")
+        zone = st.selectbox(
+            "Geopolitical Zone *",
+            list(NIGERIAN_REGIONS.keys()),
+            index=None,
+            placeholder="Select your zone"
+        )
+
+    state = None
+    lga = None
+    address = ""
+
+    if zone:
+        state = st.selectbox(
+            "State *",
+            NIGERIAN_REGIONS[zone],
+            index=None,
+            placeholder="Select your state"
+        )
+
+    if state:
+        lga = st.text_input("Local Government Area (LGA) *")
+        address = st.text_area(
+            "Detailed Address (Optional)",
+            placeholder="House number, street, area...",
+            height=100
+        )
+
+    notes = st.text_area(
+        "Additional Information (Optional)",
+        placeholder="Any special requirements or notes..."
+    )
+
+    col_btn1, col_btn2 = st.columns(2)
+
+    with col_btn1:
+        if st.button("← Back to Consent"):
+            st.session_state.current_step = 1
+            st.rerun()
+
+    with col_btn2:
+        if st.button("Next: Take Photo →", type="primary"):
+            if all([name, email, phone, zone, state, lga]):
+                st.session_state.client_data = {
+                    'full_name': name,
+                    'email': email,
+                    'phone': phone,
+                    'geopolitical_zone': zone,
+                    'state': state,
+                    'lga': lga,
+                    'address': address,
+                    'notes': notes
+                }
+                st.session_state.current_step = 3
                 st.rerun()
-            
-            if next_btn:
-                if all([name, email, phone, zone, state, lga]):
-                    st.session_state.client_data = {
-                        'full_name': name,
-                        'email': email,
-                        'phone': phone,
-                        'geopolitical_zone': zone,
-                        'state': state,
-                        'lga': lga,
-                        'address': address,
-                        'notes': notes
-                    }
-                    st.session_state.current_step = 3
-                    st.rerun()
-                else:
-                    st.error("❌ Please fill in all required fields (*)")
+            else:
+                st.error("❌ Please fill in all required fields (*)")
+
     
     # Step 3: Photo
     elif st.session_state.current_step == 3:
