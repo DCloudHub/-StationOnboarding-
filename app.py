@@ -44,6 +44,10 @@ if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 if 'client_data' not in st.session_state:
     st.session_state.client_data = {}
+if 'selected_zone' not in st.session_state:
+    st.session_state.selected_zone = None
+if 'selected_state' not in st.session_state:
+    st.session_state.selected_state = None
 if 'photo_captured' not in st.session_state:
     st.session_state.photo_captured = None
 if 'photo_metadata' not in st.session_state:
@@ -363,91 +367,112 @@ else:
             else:
                 st.error("⚠️ You must give your consent to proceed with station registration")
     
-    # Step 2: Station Information - CORRECTED DROPDOWNS
+    # Step 2: Station Information - FIXED: No form wrapping
     elif st.session_state.current_step == 2:
         st.markdown("### Step 2: Station & Owner Information")
         
-        with st.form("station_info_form"):
-            col1, col2 = st.columns(2)
+        # Owner Information Section
+        st.markdown("#### Station Owner Information")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            name = st.text_input("Owner Full Name *", placeholder="Enter owner's full name", key="owner_name")
+            email = st.text_input("Email Address *", placeholder="owner@station.com", key="owner_email")
+        
+        with col2:
+            phone = st.text_input("Phone Number *", placeholder="08012345678", key="owner_phone")
+        
+        # Station Details Section
+        st.markdown("#### Station Details")
+        station_name = st.text_input("Station Name *", placeholder="e.g., Mega Fuel Station", key="station_name")
+        
+        col_type1, col_type2 = st.columns(2)
+        with col_type1:
+            station_type = st.selectbox("Station Type *",
+                                      ["Petrol Station", "Gas Station", "Diesel Depot", "Multi-Fuel Station"],
+                                      index=None,
+                                      placeholder="Select station type",
+                                      key="station_type")
+        
+        # Location Information Group - OUTSIDE OF FORM
+        st.markdown('<div class="location-group">', unsafe_allow_html=True)
+        st.markdown("#### Station Location")
+        
+        # Use st.columns for horizontal layout
+        loc_col1, loc_col2, loc_col3 = st.columns(3)
+        
+        with loc_col1:
+            # Zone selection - updates session state immediately
+            zone = st.selectbox(
+                "Geopolitical Zone *",
+                list(NIGERIAN_REGIONS.keys()),
+                index=None,
+                placeholder="Select station zone",
+                key="zone_select"
+            )
             
-            with col1:
-                st.markdown("#### Station Owner Information")
-                name = st.text_input("Owner Full Name *", placeholder="Enter owner's full name")
-                email = st.text_input("Email Address *", placeholder="owner@station.com")
-                phone = st.text_input("Phone Number *", placeholder="08012345678")
-            
-            with col2:
-                st.markdown("#### Station Details")
-                station_name = st.text_input("Station Name *", placeholder="e.g., Mega Fuel Station")
-                
-                col_type1, col_type2 = st.columns(2)
-                with col_type1:
-                    station_type = st.selectbox("Station Type *",
-                                              ["Petrol Station", "Gas Station", "Diesel Depot", "Multi-Fuel Station"],
-                                              index=None,
-                                              placeholder="Select station type")
-            
-            # Location Information Group - ALL TOGETHER
-            st.markdown('<div class="location-group">', unsafe_allow_html=True)
-            st.markdown("#### Station Location")
-            
-            # Use st.columns for horizontal layout
-            loc_col1, loc_col2, loc_col3 = st.columns(3)
-            
-            with loc_col1:
-                # Zone selection
-                zone = st.selectbox(
-                    "Geopolitical Zone *",
-                    list(NIGERIAN_REGIONS.keys()),
-                    index=None,
-                    placeholder="Select station zone",
-                    key="zone_select"
-                )
-            
-            with loc_col2:
-                # State selection - IMMEDIATELY appears when Zone is selected
-                state_options = NIGERIAN_REGIONS[zone] if zone else []
-                state = st.selectbox(
-                    "State *",
-                    state_options,
-                    index=None,
-                    placeholder="Select state" if zone else "Select zone first",
-                    disabled=not zone,
-                    key="state_select"
-                )
-            
-            with loc_col3:
-                # LGA input - IMMEDIATELY appears when State is selected
-                lga = st.text_input(
-                    "Local Government Area (LGA) *",
-                    placeholder="Enter station LGA" if state else "Select state first",
-                    disabled=not state,
-                    key="lga_input"
-                )
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Address field
-            address = st.text_area("Station Address *", 
-                                 placeholder="Full address including street, area, landmark...",
-                                 height=80,
-                                 key="address_input")
-            
-            notes = st.text_area("Additional Information (Optional)", 
-                               placeholder="Any special notes, facilities, or additional information...",
-                               key="notes_input")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                back = st.form_submit_button("← Back to Consent")
-            with col_btn2:
-                next_btn = st.form_submit_button("Next: Capture Station Photo →", type="primary")
-            
-            if back:
-                st.session_state.current_step = 1
+            # Update session state when zone changes
+            if zone != st.session_state.get('selected_zone'):
+                st.session_state.selected_zone = zone
+                st.session_state.selected_state = None  # Reset state when zone changes
                 st.rerun()
+        
+        with loc_col2:
+            # State selection - IMMEDIATELY appears when Zone is selected
+            state_options = NIGERIAN_REGIONS[st.session_state.selected_zone] if st.session_state.selected_zone else []
             
-            if next_btn:
+            # Get current state value
+            current_state = st.session_state.get('selected_state')
+            state_index = None
+            if current_state and current_state in state_options:
+                state_index = state_options.index(current_state)
+            
+            state = st.selectbox(
+                "State *",
+                state_options,
+                index=state_index,
+                placeholder="Select state" if st.session_state.selected_zone else "Select zone first",
+                disabled=not st.session_state.selected_zone,
+                key="state_select"
+            )
+            
+            # Update session state when state changes
+            if state != st.session_state.get('selected_state'):
+                st.session_state.selected_state = state
+                # Don't rerun here to avoid interrupting user input
+        
+        with loc_col3:
+            # LGA input - IMMEDIATELY appears when State is selected
+            lga = st.text_input(
+                "Local Government Area (LGA) *",
+                placeholder="Enter station LGA" if st.session_state.selected_state else "Select state first",
+                disabled=not st.session_state.selected_state,
+                key="lga_input"
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Address field
+        address = st.text_area("Station Address *", 
+                             placeholder="Full address including street, area, landmark...",
+                             height=80,
+                             key="address_input")
+        
+        notes = st.text_area("Additional Information (Optional)", 
+                           placeholder="Any special notes, facilities, or additional information...",
+                           key="notes_input")
+        
+        # Navigation buttons
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("← Back to Consent"):
+                st.session_state.current_step = 1
+                st.session_state.selected_zone = None
+                st.session_state.selected_state = None
+                st.rerun()
+        
+        with col_btn2:
+            if st.button("Next: Capture Station Photo →", type="primary"):
                 # Validate all required fields
                 required_fields = {
                     "Owner Name": name,
@@ -455,8 +480,8 @@ else:
                     "Phone": phone,
                     "Station Name": station_name,
                     "Station Type": station_type,
-                    "Zone": zone,
-                    "State": state,
+                    "Zone": st.session_state.selected_zone,
+                    "State": st.session_state.selected_state,
                     "LGA": lga,
                     "Address": address
                 }
@@ -468,8 +493,8 @@ else:
                         'full_name': name,
                         'email': email,
                         'phone': phone,
-                        'geopolitical_zone': zone,
-                        'state': state,
+                        'geopolitical_zone': st.session_state.selected_zone,
+                        'state': st.session_state.selected_state,
                         'lga': lga,
                         'station_name': station_name,
                         'station_type': station_type,
@@ -889,6 +914,8 @@ else:
                         # Reset for next registration
                         st.session_state.consent_given = False
                         st.session_state.current_step = 1
+                        st.session_state.selected_zone = None
+                        st.session_state.selected_state = None
                         st.session_state.client_data = {}
                         st.session_state.photo_captured = None
                         st.session_state.photo_metadata = None
