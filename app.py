@@ -184,8 +184,22 @@ def save_submission_to_db(submission_data, photo_bytes=None, photo_metadata=None
         submission_data_with_meta = submission_data.copy()
         if photo_metadata:
             submission_data_with_meta['photo_timestamp'] = photo_metadata.get('timestamp')
-            submission_data_with_meta['photo_latitude'] = photo_metadata.get('latitude')
-            submission_data_with_meta['photo_longitude'] = photo_metadata.get('longitude')
+            
+            # Safely get latitude
+            photo_lat = photo_metadata.get('latitude')
+            if photo_lat is not None:
+                try:
+                    submission_data_with_meta['photo_latitude'] = float(photo_lat)
+                except (ValueError, TypeError):
+                    submission_data_with_meta['photo_latitude'] = None
+            
+            # Safely get longitude
+            photo_lon = photo_metadata.get('longitude')
+            if photo_lon is not None:
+                try:
+                    submission_data_with_meta['photo_longitude'] = float(photo_lon)
+                except (ValueError, TypeError):
+                    submission_data_with_meta['photo_longitude'] = None
         
         c.execute('''
             INSERT INTO submissions (
@@ -367,7 +381,7 @@ else:
             else:
                 st.error("⚠️ You must give your consent to proceed with station registration")
     
-    # Step 2: Station Information - FIXED: No form wrapping
+    # Step 2: Station Information - FIXED: No form wrapping, real-time updates
     elif st.session_state.current_step == 2:
         st.markdown("### Step 2: Station & Owner Information")
         
@@ -394,7 +408,7 @@ else:
                                       placeholder="Select station type",
                                       key="station_type")
         
-        # Location Information Group - OUTSIDE OF FORM
+        # Location Information Group - OUTSIDE OF FORM, real-time updates
         st.markdown('<div class="location-group">', unsafe_allow_html=True)
         st.markdown("#### Station Location")
         
@@ -621,12 +635,12 @@ else:
                     img_with_meta.save(img_bytes, format='JPEG', quality=95)
                     img_bytes.seek(0)
                     
-                    # Store in session state
+                    # Store in session state with safe coordinate handling
                     st.session_state.photo_captured = img_bytes
                     st.session_state.photo_metadata = {
                         'timestamp': timestamp,
-                        'latitude': lat,
-                        'longitude': lon,
+                        'latitude': float(lat) if lat is not None else None,
+                        'longitude': float(lon) if lon is not None else None,
                         'station_name': station_name,
                         'image_format': 'JPEG',
                         'has_metadata_overlay': True
@@ -649,8 +663,8 @@ else:
                     st.warning("⚠️ Photo captured but metadata embedding failed")
                     st.session_state.photo_metadata = {
                         'timestamp': timestamp,
-                        'latitude': lat,
-                        'longitude': lon,
+                        'latitude': float(lat) if lat is not None else None,
+                        'longitude': float(lon) if lon is not None else None,
                         'has_metadata_overlay': False
                     }
             else:
@@ -680,7 +694,7 @@ else:
                 st.session_state.current_step = 4
                 st.rerun()
     
-    # Step 4: Location Verification
+    # Step 4: Location Verification - FIXED: Safe coordinate handling
     elif st.session_state.current_step == 4:
         st.markdown("### Step 4: Location Verification")
         
@@ -715,13 +729,29 @@ else:
         
         col_lat, col_lon = st.columns(2)
         with col_lat:
-            # Pre-fill with photo coordinates if available
-            default_lat = st.session_state.photo_metadata.get('latitude', 0.0) if st.session_state.photo_metadata else 0.0
-            latitude = st.number_input("Latitude *", format="%.6f", value=float(default_lat),
+            # Get default latitude safely
+            default_lat = 0.0
+            if (st.session_state.photo_metadata and 
+                st.session_state.photo_metadata.get('latitude') is not None):
+                try:
+                    default_lat = float(st.session_state.photo_metadata['latitude'])
+                except (ValueError, TypeError):
+                    default_lat = 0.0
+            
+            latitude = st.number_input("Latitude *", format="%.6f", value=default_lat,
                                      help="Example: 9.076479 (for Abuja)")
+        
         with col_lon:
-            default_lon = st.session_state.photo_metadata.get('longitude', 0.0) if st.session_state.photo_metadata else 0.0
-            longitude = st.number_input("Longitude *", format="%.6f", value=float(default_lon),
+            # Get default longitude safely
+            default_lon = 0.0
+            if (st.session_state.photo_metadata and 
+                st.session_state.photo_metadata.get('longitude') is not None):
+                try:
+                    default_lon = float(st.session_state.photo_metadata['longitude'])
+                except (ValueError, TypeError):
+                    default_lon = 0.0
+            
+            longitude = st.number_input("Longitude *", format="%.6f", value=default_lon,
                                       help="Example: 7.398574 (for Abuja)")
         
         # Show station information
