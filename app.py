@@ -53,7 +53,7 @@ if 'admin_authenticated' not in st.session_state:
 if 'view_submissions' not in st.session_state:
     st.session_state.view_submissions = False
 
-# Clean CSS - No leftover styles
+# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -189,8 +189,9 @@ def get_all_submissions():
     except:
         return []
 
-# Step indicator function
+# FIXED Step indicator function
 def show_step_indicator():
+    """Display step indicator - FIXED"""
     steps = [
         {"number": 1, "label": "Consent"},
         {"number": 2, "label": "Information"}, 
@@ -199,19 +200,46 @@ def show_step_indicator():
         {"number": 5, "label": "Review"}
     ]
     
-    html = '<div class="step-container">'
+    # Create HTML string properly
+    html_parts = ['<div class="step-container">']
     
     for step in steps:
         is_active = "active" if step["number"] == st.session_state.current_step else ""
-        html += f'''
+        step_html = f'''
         <div class="step-item {is_active}">
             <div class="step-number">{step["number"]}</div>
             <div class="step-label">{step["label"]}</div>
         </div>
         '''
+        html_parts.append(step_html)
     
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
+    html_parts.append('</div>')
+    
+    # Join all parts
+    final_html = ''.join(html_parts)
+    
+    # Display using components
+    st.components.v1.html(final_html, height=100)
+
+# Alternative: Use Streamlit columns instead of HTML
+def show_step_indicator_simple():
+    """Alternative: Use Streamlit columns for steps"""
+    steps = ["Consent", "Information", "Photo", "Location", "Review"]
+    
+    cols = st.columns(5)
+    for i, (col, step_name) in enumerate(zip(cols, steps), 1):
+        with col:
+            is_active = i == st.session_state.current_step
+            bg_color = "#1E3A8A" if is_active else "#e5e7eb"
+            text_color = "white" if is_active else "#6b7280"
+            
+            st.markdown(f"""
+            <div style="text-align: center; padding: 10px; border-radius: 5px; 
+                        background-color: {bg_color}; color: {text_color}; font-weight: bold;">
+                <div style="font-size: 1.2rem;">{i}</div>
+                <div style="font-size: 0.9rem;">{step_name}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # Header
 st.markdown('<h1 class="main-header">📍 Station Onboarding</h1>', unsafe_allow_html=True)
@@ -260,9 +288,10 @@ if st.session_state.admin_authenticated and st.session_state.view_submissions:
         st.rerun()
 
 else:
-    show_step_indicator()
+    # USE THE SIMPLE VERSION INSTEAD - NO HTML ISSUES
+    show_step_indicator_simple()
     
-    # Step 1: Consent - CLEAN VERSION
+    # Step 1: Consent
     if st.session_state.current_step == 1:
         st.markdown("### Step 1: Consent & Agreement")
         
@@ -290,7 +319,7 @@ else:
             - You understand your data rights under applicable laws
             """)
         
-        # CLEAN CONSENT CHECKBOX - NO STRAY ELEMENTS
+        # CLEAN CONSENT CHECKBOX
         st.markdown('<div class="consent-box">', unsafe_allow_html=True)
         
         consent_all = st.checkbox(
