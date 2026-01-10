@@ -11,6 +11,8 @@ from datetime import datetime
 import base64
 import hashlib
 import secrets
+import json
+from streamlit.components.v1 import html
 
 # Page config
 st.set_page_config(
@@ -30,6 +32,8 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
     st.session_state.username = None
+if 'gps_data' not in st.session_state:
+    st.session_state.gps_data = None
 
 # Database initialization
 def init_db():
@@ -285,261 +289,215 @@ else:
         if st.button("➕ Register Another Station", type="primary", use_container_width=True):
             st.session_state.station_saved = False
             st.session_state.station_id = None
+            st.session_state.gps_data = None
             st.rerun()
     
     else:
         st.header("📍 Register New Station")
         
-        # Create form columns
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            station_name = st.text_input("Station Name *", 
-                                       placeholder="e.g., Mega Fuel Station",
-                                       help="Enter the official name of your fuel station")
-            owner_name = st.text_input("Owner Name *", 
-                                     placeholder="Full name",
-                                     help="Enter the full name of the station owner")
-        
-        with col2:
-            phone = st.text_input("Phone Number *", 
-                                placeholder="08012345678",
-                                help="Enter a valid phone number for contact")
-        
-        # Hidden fields for GPS data
-        st.markdown("---")
-        st.markdown("### 📱 GPS Location Capture")
-        
-        # Check if all required fields are filled
-        all_fields_filled = all([station_name, owner_name, phone])
-        
-        if not all_fields_filled:
-            st.warning("⚠️ Please fill all station information above before capturing GPS")
-        
-        # GPS capture component
-        gps_html = f'''
-        <div style="text-align: center; margin: 20px 0;">
-            <button onclick="captureGPS()" style="
-                background: {'linear-gradient(135deg, #1E3A8A 0%, #1E40AF 100%)' if all_fields_filled else 'linear-gradient(135deg, #6b7280 0%, #9ca3af 100%)'};
-                color: white;
-                border: none;
-                padding: 20px 40px;
-                border-radius: 10px;
-                font-size: 1.2rem;
-                font-weight: bold;
-                cursor: {'pointer' if all_fields_filled else 'not-allowed'};
-                width: 100%;
-                max-width: 500px;
-                margin: 0 auto;
-                display: block;
-                opacity: {'1' if all_fields_filled else '0.6'};
-            "
-                {'disabled' if not all_fields_filled else ''}
-            >
-                {'📍 CAPTURE GPS & SUBMIT REGISTRATION' if all_fields_filled else '⛔ FILL FORM FIRST'}
-            </button>
+        # Create form with hidden fields
+        with st.form("registration_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
             
-            <div id="gps-status" style="
-                margin: 20px auto;
-                padding: 20px;
-                background: white;
-                border-radius: 8px;
-                border: 2px solid #e5e7eb;
-                max-width: 500px;
-                min-height: 120px;
-            ">
-                <div style="color: #6b7280; text-align: center;">
-                    {f'✓ All fields filled! Click button to capture GPS and submit' if all_fields_filled else 'Fill all station information above first'}
+            with col1:
+                station_name = st.text_input("Station Name *", 
+                                           placeholder="e.g., Mega Fuel Station",
+                                           help="Enter the official name of your fuel station")
+                owner_name = st.text_input("Owner Name *", 
+                                         placeholder="Full name",
+                                         help="Enter the full name of the station owner")
+            
+            with col2:
+                phone = st.text_input("Phone Number *", 
+                                    placeholder="08012345678",
+                                    help="Enter a valid phone number for contact")
+            
+            # Hidden fields for GPS data (will be populated by JavaScript)
+            latitude = st.number_input("Latitude", value=0.0, format="%.6f", key="lat", label_visibility="collapsed")
+            longitude = st.number_input("Longitude", value=0.0, format="%.6f", key="lon", label_visibility="collapsed")
+            accuracy = st.number_input("Accuracy", value=0.0, format="%.1f", key="acc", label_visibility="collapsed")
+            
+            st.markdown("---")
+            st.markdown("### 📱 Capture GPS Location")
+            
+            # Check if all fields are filled
+            all_fields_filled = all([station_name, owner_name, phone])
+            
+            if not all_fields_filled:
+                st.warning("⚠️ Please fill all station information above")
+            
+            # Display GPS capture button
+            gps_html = f'''
+            <div style="text-align: center; margin: 20px 0;">
+                <div id="gps-button-container">
+                    <button onclick="captureGPS()" id="gps-button" style="
+                        background: {'linear-gradient(135deg, #1E3A8A 0%, #1E40AF 100%)' if all_fields_filled else 'linear-gradient(135deg, #6b7280 0%, #9ca3af 100%)'};
+                        color: white;
+                        border: none;
+                        padding: 20px 40px;
+                        border-radius: 10px;
+                        font-size: 1.2rem;
+                        font-weight: bold;
+                        cursor: {'pointer' if all_fields_filled else 'not-allowed'};
+                        width: 100%;
+                        max-width: 500px;
+                        margin: 0 auto;
+                        display: block;
+                        opacity: {'1' if all_fields_filled else '0.6'};
+                    ">
+                        {'📍 CAPTURE GPS & SUBMIT REGISTRATION' if all_fields_filled else '⛔ FILL FORM FIRST'}
+                    </button>
+                </div>
+                
+                <div id="gps-status" style="
+                    margin: 20px auto;
+                    padding: 20px;
+                    background: white;
+                    border-radius: 8px;
+                    border: 2px solid #e5e7eb;
+                    max-width: 500px;
+                    min-height: 120px;
+                ">
+                    <div style="color: #6b7280; text-align: center;">
+                        {f'✓ All fields filled! Click button to capture GPS and submit' if all_fields_filled else 'Fill all station information above first'}
+                    </div>
                 </div>
             </div>
             
-            <!-- Hidden form that will be submitted with GPS data -->
-            <form id="gps-form" style="display: none;">
-                <input type="hidden" name="station_name" value="{station_name or ''}">
-                <input type="hidden" name="owner_name" value="{owner_name or ''}">
-                <input type="hidden" name="phone" value="{phone or ''}">
-                <input type="hidden" name="latitude" id="latitude-input">
-                <input type="hidden" name="longitude" id="longitude-input">
-                <input type="hidden" name="accuracy" id="accuracy-input">
-                <button type="submit" id="submit-btn"></button>
-            </form>
-            
-            <div id="form-status" style="display: none;"></div>
-        </div>
-        
-        <script>
-        function captureGPS() {{
-            // Check if form is filled (client-side validation)
-            const stationName = "{station_name or ''}";
-            const ownerName = "{owner_name or ''}";
-            const phone = "{phone or ''}";
-            
-            if (!stationName || !ownerName || !phone) {{
-                document.getElementById('gps-status').innerHTML = `
-                    <div style="color: #dc2626; font-weight: bold;">
-                        ❌ Please fill all station information first
+            <script>
+            function captureGPS() {{
+                // Double-check form is filled
+                const allFilled = {str(all_fields_filled).lower()};
+                if (!allFilled) {{
+                    document.getElementById('gps-status').innerHTML = `
+                        <div style="color: #dc2626; font-weight: bold;">
+                            ❌ Please fill all station information first
+                        </div>
+                        <p style="color: #6b7280;">Fill the form above before capturing GPS</p>
+                    `;
+                    return;
+                }}
+                
+                const gpsStatus = document.getElementById('gps-status');
+                const button = document.getElementById('gps-button');
+                
+                button.innerHTML = '⏳ GETTING LOCATION...';
+                button.disabled = true;
+                
+                gpsStatus.innerHTML = `
+                    <div style="color: #f59e0b; font-weight: bold;">
+                        ⏳ REQUESTING LOCATION...
                     </div>
-                    <p style="color: #6b7280;">Fill the form above before capturing GPS</p>
+                    <p style="color: #6b7280;">Please allow location access</p>
                 `;
-                return;
-            }}
-            
-            const gpsStatus = document.getElementById('gps-status');
-            const button = document.querySelector('button[onclick="captureGPS()"]');
-            
-            button.innerHTML = '⏳ GETTING LOCATION...';
-            button.disabled = true;
-            
-            gpsStatus.innerHTML = `
-                <div style="color: #f59e0b; font-weight: bold;">
-                    ⏳ REQUESTING LOCATION...
-                </div>
-                <p style="color: #6b7280;">Please allow location access</p>
-            `;
-            
-            if (navigator.geolocation) {{
-                navigator.geolocation.getCurrentPosition(
-                    function(position) {{
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        const acc = position.coords.accuracy;
-                        
-                        // Show captured coordinates
-                        gpsStatus.innerHTML = `
-                            <div style="color: #059669; font-weight: bold;">
-                                ✅ GPS CAPTURED! SUBMITTING...
-                            </div>
-                            <div style="background: #f0f9ff; padding: 15px; border-radius: 5px; margin-top: 10px;">
-                                <div style="font-family: monospace;">
-                                    <strong>Latitude:</strong> ${{lat.toFixed(6)}}<br>
-                                    <strong>Longitude:</strong> ${{lon.toFixed(6)}}<br>
-                                    <strong>Accuracy:</strong> ±${{acc.toFixed(1)}}m
+                
+                if (navigator.geolocation) {{
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {{
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            const acc = position.coords.accuracy;
+                            
+                            // Show captured coordinates
+                            gpsStatus.innerHTML = `
+                                <div style="color: #059669; font-weight: bold;">
+                                    ✅ GPS CAPTURED! SUBMITTING...
                                 </div>
-                            </div>
-                        `;
-                        
-                        button.innerHTML = '✅ SUBMITTING...';
-                        button.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-                        
-                        // Fill the hidden form
-                        document.getElementById('latitude-input').value = lat;
-                        document.getElementById('longitude-input').value = lon;
-                        document.getElementById('accuracy-input').value = acc;
-                        
-                        // Submit the form
-                        setTimeout(() => {{
-                            document.getElementById('submit-btn').click();
-                        }}, 1500);
-                        
-                    }},
-                    function(error) {{
-                        let errorMsg = "Failed to get location";
-                        if (error.code === 1) errorMsg = "Permission denied";
-                        if (error.code === 2) errorMsg = "Location unavailable";
-                        if (error.code === 3) errorMsg = "Request timeout";
-                        
-                        gpsStatus.innerHTML = `
-                            <div style="color: #dc2626; font-weight: bold;">
-                                ❌ ${{errorMsg}}
-                            </div>
-                            <p style="color: #6b7280;">Please try again</p>
-                        `;
-                        
-                        button.innerHTML = '📍 TRY AGAIN';
-                        button.disabled = false;
-                    }},
-                    {{ enableHighAccuracy: true, timeout: 15000 }}
-                );
-            }} else {{
-                gpsStatus.innerHTML = '<div style="color: #dc2626;">GPS not supported</div>';
-                button.disabled = false;
+                                <div style="background: #f0f9ff; padding: 15px; border-radius: 5px; margin-top: 10px;">
+                                    <div style="font-family: monospace;">
+                                        <strong>Latitude:</strong> ${{lat.toFixed(6)}}<br>
+                                        <strong>Longitude:</strong> ${{lon.toFixed(6)}}<br>
+                                        <strong>Accuracy:</strong> ±${{acc.toFixed(1)}}m
+                                    </div>
+                                </div>
+                            `;
+                            
+                            button.innerHTML = '✅ SUBMITTING...';
+                            button.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                            
+                            // Update the hidden Streamlit inputs
+                            const latInput = document.querySelector('input[aria-label="Latitude"]');
+                            const lonInput = document.querySelector('input[aria-label="Longitude"]');
+                            const accInput = document.querySelector('input[aria-label="Accuracy"]');
+                            
+                            if (latInput) latInput.value = lat;
+                            if (lonInput) lonInput.value = lon;
+                            if (accInput) accInput.value = acc;
+                            
+                            // Find and click the Streamlit form submit button
+                            setTimeout(() => {{
+                                // Look for the form's submit button
+                                const form = document.querySelector('form');
+                                if (form) {{
+                                    const submitBtn = form.querySelector('button[type="submit"]');
+                                    if (submitBtn) {{
+                                        submitBtn.click();
+                                    }}
+                                }}
+                            }}, 1500);
+                            
+                        }},
+                        function(error) {{
+                            let errorMsg = "Failed to get location";
+                            if (error.code === 1) errorMsg = "Permission denied";
+                            if (error.code === 2) errorMsg = "Location unavailable";
+                            if (error.code === 3) errorMsg = "Request timeout";
+                            
+                            gpsStatus.innerHTML = `
+                                <div style="color: #dc2626; font-weight: bold;">
+                                    ❌ ${{errorMsg}}
+                                </div>
+                                <p style="color: #6b7280;">Please try again</p>
+                            `;
+                            
+                            button.innerHTML = {'📍 CAPTURE GPS & SUBMIT REGISTRATION' if all_fields_filled else '⛔ FILL FORM FIRST'};
+                            button.disabled = false;
+                        }},
+                        {{ enableHighAccuracy: true, timeout: 15000 }}
+                    );
+                }} else {{
+                    gpsStatus.innerHTML = '<div style="color: #dc2626;">GPS not supported</div>';
+                    button.disabled = false;
+                }}
             }}
-        }}
-        
-        // Handle form submission
-        document.getElementById('gps-form').addEventListener('submit', function(e) {{
-            e.preventDefault();
+            </script>
+            '''
             
-            // Create FormData from the form
-            const formData = new FormData(this);
+            # Display the GPS component
+            st.components.v1.html(gps_html, height=350)
             
-            // Send data to Streamlit via fetch
-            fetch(window.location.href, {{
-                method: 'POST',
-                headers: {{
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                }},
-                body: new URLSearchParams(formData)
-            }}).then(response => {{
-                // Show success message
-                document.getElementById('gps-status').innerHTML = `
-                    <div style="color: #059669; font-weight: bold; text-align: center;">
-                        ✅ Registration Complete!
-                    </div>
-                    <div style="background: #d1fae5; padding: 15px; border-radius: 5px; margin-top: 10px;">
-                        <p style="color: #065f46; text-align: center;">
-                            Station has been registered successfully.<br>
-                            Page will refresh shortly...
-                        </p>
-                    </div>
-                `;
-                
-                // Refresh page after delay
-                setTimeout(() => {{
-                    window.location.reload();
-                }}, 3000);
-            }}).catch(error => {{
-                document.getElementById('gps-status').innerHTML = `
-                    <div style="color: #dc2626; font-weight: bold;">
-                        ❌ Submission Failed
-                    </div>
-                    <p style="color: #6b7280;">Please try again or contact support</p>
-                `;
-            }});
-        }});
-        </script>
-        '''
+            # Regular submit button (hidden but functional)
+            submitted = st.form_submit_button(
+                "Submit Registration",
+                type="primary",
+                use_container_width=True,
+                disabled=not all_fields_filled
+            )
         
-        # Display the GPS component
-        st.components.v1.html(gps_html, height=350)
-        
-        # Check for form submission
-        if st.request is not None and st.request.method == "POST":
-            try:
-                # Get form data from POST request
-                form_data = st.request.body.decode('utf-8')
-                params = dict(pair.split('=') for pair in form_data.split('&') if '=' in pair)
-                
-                # Decode URL encoded values
-                station_name_val = params.get('station_name', '').replace('+', ' ')
-                owner_name_val = params.get('owner_name', '').replace('+', ' ')
-                phone_val = params.get('phone', '')
-                latitude_val = float(params.get('latitude', 0))
-                longitude_val = float(params.get('longitude', 0))
-                accuracy_val = float(params.get('accuracy', 0))
-                
+        # Handle form submission
+        if submitted:
+            # Check if GPS data was captured
+            if latitude == 0.0 and longitude == 0.0:
+                st.error("GPS location not captured! Please click the 'Capture GPS & Submit Registration' button.")
+            elif not all([station_name, owner_name, phone]):
+                st.error("Please fill all required fields")
+            else:
                 # Save to database
-                if station_name_val and owner_name_val and phone_val:
-                    station_id = save_station_to_db(
-                        station_name_val,
-                        owner_name_val,
-                        phone_val,
-                        latitude_val,
-                        longitude_val,
-                        accuracy_val
-                    )
-                    
-                    if station_id:
-                        st.session_state.station_saved = True
-                        st.session_state.station_id = station_id
-                        st.rerun()
-                    else:
-                        st.error("Failed to save to database")
+                station_id = save_station_to_db(
+                    station_name,
+                    owner_name,
+                    phone,
+                    latitude,
+                    longitude,
+                    accuracy
+                )
+                
+                if station_id:
+                    st.session_state.station_saved = True
+                    st.session_state.station_id = station_id
+                    st.rerun()
                 else:
-                    st.error("Missing required information")
-                    
-            except Exception as e:
-                st.error(f"Error processing form: {e}")
+                    st.error("Failed to save to database. Please try again.")
 
 # Footer
 st.markdown("---")
@@ -564,3 +522,15 @@ div[data-testid="stForm"] {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# JavaScript to handle page reload and clear form
+if st.session_state.get('station_saved'):
+    clear_js = """
+    <script>
+    // Clear any stored GPS data
+    if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('gps_coordinates');
+    }
+    </script>
+    """
+    st.components.v1.html(clear_js, height=0)
