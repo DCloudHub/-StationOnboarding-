@@ -53,7 +53,7 @@ if 'admin_authenticated' not in st.session_state:
 if 'view_submissions' not in st.session_state:
     st.session_state.view_submissions = False
 
-# Custom CSS
+# Clean CSS - No leftover styles
 st.markdown("""
 <style>
     .main-header {
@@ -120,12 +120,6 @@ st.markdown("""
         padding: 2rem;
         background-color: #f9fafb;
         margin: 2rem 0;
-    }
-    .consent-item {
-        margin: 1rem 0;
-        padding: 0.5rem;
-        background-color: #f3f4f6;
-        border-radius: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -268,7 +262,7 @@ if st.session_state.admin_authenticated and st.session_state.view_submissions:
 else:
     show_step_indicator()
     
-    # Step 1: Consent - UPDATED: SINGLE CHECKBOX
+    # Step 1: Consent - CLEAN VERSION
     if st.session_state.current_step == 1:
         st.markdown("### Step 1: Consent & Agreement")
         
@@ -281,40 +275,26 @@ else:
             ### 1. Photo Capture Consent
             - You consent to have your photo taken for identity verification
             - The photo will be used solely for verification purposes
-            - Photo will be stored securely and deleted after verification
             
             ### 2. Location Data Consent  
             - You consent to share your precise location coordinates
             - Location data will be used for service delivery planning
-            - Coordinates will be used to determine service eligibility
             
             ### 3. Personal Information Consent
             - You consent to provide your full name, email, and phone number
             - This information will be used for communication and service delivery
-            - Data will be handled in accordance with privacy regulations
             
             ### 4. Terms & Conditions Acceptance
             - You agree to abide by our Terms & Conditions
             - You acknowledge our Privacy Policy
             - You understand your data rights under applicable laws
-            
-            ### Your Data Rights:
-            - Right to access your data
-            - Right to correction
-            - Right to deletion (where applicable)
-            - Right to restrict processing
             """)
         
+        # CLEAN CONSENT CHECKBOX - NO STRAY ELEMENTS
         st.markdown('<div class="consent-box">', unsafe_allow_html=True)
         
-        # SINGLE CONSENT CHECKBOX - MERGED ALL
         consent_all = st.checkbox(
-            "✅ **I consent to ALL of the above:**\n"
-            "- Photo capture for identity verification\n"
-            "- Location data collection for service delivery\n" 
-            "- Personal information processing\n"
-            "- Terms & Conditions and Privacy Policy\n\n"
-            "By checking this box, I acknowledge that I have read and understood all the terms above.",
+            "✅ **I consent to ALL of the above terms and conditions**",
             help="Check this box to give your consent for all data collection and processing"
         )
         
