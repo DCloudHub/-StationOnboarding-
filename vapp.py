@@ -1,6 +1,6 @@
 """
-Station Onboarding System - AUTO-SAVE GPS
-GPS automatically saves → Admin can view immediately
+Station Onboarding System - AUTO-SAVE GPS with Admin Authentication
+GPS automatically saves → Admin can view after login
 """
 
 import streamlit as st
@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime
 import base64
 import json
+import hashlib
+import secrets
 from streamlit.components.v1 import html
 
 # Page config
@@ -22,19 +24,25 @@ st.set_page_config(
 # Initialize session state
 if 'gps_data' not in st.session_state:
     st.session_state.gps_data = None
-if 'current_step' not in st.session_state:
-    st.session_state.current_step = 1
 if 'station_saved' not in st.session_state:
     st.session_state.station_saved = False
 if 'station_id' not in st.session_state:
     st.session_state.station_id = None
 if 'admin_mode' not in st.session_state:
     st.session_state.admin_mode = False
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'login_attempted' not in st.session_state:
+    st.session_state.login_attempted = False
 
-# Database
+# Database initialization
 def init_db():
     conn = sqlite3.connect('stations_gps.db')
     c = conn.cursor()
+    
+    # Stations table
     c.execute('''
         CREATE TABLE IF NOT EXISTS stations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,11 +57,113 @@ def init_db():
             timestamp TEXT
         )
     ''')
+    
+    # Admin users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password_hash TEXT,
+            salt TEXT,
+            full_name TEXT,
+            role TEXT DEFAULT 'admin',
+            created_at TEXT
+        )
+    ''')
+    
+    # Create default admin if not exists
+    c.execute("SELECT COUNT(*) FROM admin_users WHERE username = 'admin'")
+    if c.fetchone()[0] == 0:
+        salt = secrets.token_hex(16)
+        password = "admin123"  # Default password - should be changed
+        password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+        
+        c.execute('''
+            INSERT INTO admin_users (username, password_hash, salt, full_name, role, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', ('admin', password_hash, salt, 'Administrator', 'admin', datetime.now().isoformat()))
+        
+        conn.commit()
+        print("Default admin created: admin/admin123")
+    
     conn.commit()
     return conn
 
 conn = init_db()
 
+# Password hashing functions
+def hash_password(password, salt=None):
+    if salt is None:
+        salt = secrets.token_hex(16)
+    password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+    return password_hash, salt
+
+def verify_password(password, stored_hash, salt):
+    return hashlib.sha256((password + salt).encode()).hexdigest() == stored_hash
+
+# Admin user management
+def create_admin_user(username, password, full_name):
+    try:
+        c = conn.cursor()
+        password_hash, salt = hash_password(password)
+        
+        c.execute('''
+            INSERT INTO admin_users (username, password_hash, salt, full_name, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (username, password_hash, salt, full_name, datetime.now().isoformat()))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error creating user: {e}")
+        return False
+
+def authenticate_user(username, password):
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT username, password_hash, salt, full_name, role 
+            FROM admin_users 
+            WHERE username = ?
+        ''', (username,))
+        
+        result = c.fetchone()
+        if result:
+            stored_hash = result[1]
+            salt = result[2]
+            
+            if verify_password(password, stored_hash, salt):
+                return {
+                    'username': result[0],
+                    'full_name': result[3],
+                    'role': result[4]
+                }
+        return None
+    except Exception as e:
+        st.error(f"Authentication error: {e}")
+        return None
+
+def change_admin_password(username, old_password, new_password):
+    try:
+        user = authenticate_user(username, old_password)
+        if user:
+            c = conn.cursor()
+            new_hash, new_salt = hash_password(new_password)
+            
+            c.execute('''
+                UPDATE admin_users 
+                SET password_hash = ?, salt = ?
+                WHERE username = ?
+            ''', (new_hash, new_salt, username))
+            
+            conn.commit()
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Password change error: {e}")
+        return False
+
+# Station functions
 def save_station_to_db(station_name, owner_name, phone, gps_data):
     """Save station with GPS to database"""
     try:
@@ -96,7 +206,33 @@ def get_all_stations():
         st.error(f"Fetch error: {e}")
         return []
 
-# JavaScript to pass GPS data to Streamlit
+def update_station_status(station_id, status):
+    """Update station status"""
+    try:
+        c = conn.cursor()
+        c.execute('''
+            UPDATE stations 
+            SET status = ?
+            WHERE station_id = ?
+        ''', (status, station_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Update error: {e}")
+        return False
+
+def delete_station(station_id):
+    """Delete a station"""
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM stations WHERE station_id = ?', (station_id,))
+        conn.commit()
+        return c.rowcount > 0
+    except Exception as e:
+        st.error(f"Delete error: {e}")
+        return False
+
+# GPS Capture Component
 def gps_capture_component():
     """Component that captures GPS and sends to Streamlit"""
     html_code = '''
@@ -131,8 +267,6 @@ def gps_capture_component():
                 Click button to capture station location
             </div>
         </div>
-        
-        <div id="streamlit-status" style="display: none;"></div>
     </div>
     
     <script>
@@ -189,8 +323,8 @@ def gps_capture_component():
                     
                     // Send to Streamlit
                     window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: JSON.stringify(data)
+                        type: 'gps:coordinates',
+                        data: JSON.stringify(data)
                     }, '*');
                     
                 },
@@ -241,10 +375,10 @@ def gps_capture_component():
         button.innerHTML = '✅ LOCATION CAPTURED';
         button.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
         
-        // Resend to Streamlit to update session state
+        // Resend to Streamlit
         window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            value: JSON.stringify(data)
+            type: 'gps:coordinates',
+            data: savedGPS
         }, '*');
     }
     </script>
@@ -252,31 +386,100 @@ def gps_capture_component():
     
     return html_code
 
+# Login/Logout functions
+def show_login_form():
+    """Display login form"""
+    st.markdown("### 🔐 Admin Login")
+    
+    with st.form("login_form"):
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submitted = st.form_submit_button("Login", use_container_width=True)
+        
+        if submitted:
+            if not username or not password:
+                st.error("Please enter both username and password")
+                st.session_state.login_attempted = True
+                return False
+            
+            user = authenticate_user(username, password)
+            if user:
+                st.session_state.logged_in = True
+                st.session_state.username = user['username']
+                st.session_state.admin_mode = True
+                st.session_state.login_attempted = False
+                st.success(f"Welcome, {user['full_name']}!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+                st.session_state.login_attempted = True
+                return False
+    return False
+
+def logout():
+    """Logout user"""
+    st.session_state.logged_in = False
+    st.session_state.username = None
+    st.session_state.admin_mode = False
+    st.session_state.login_attempted = False
+    st.rerun()
+
 # Main app
 st.title("⛽ Fuel Station GPS Registration")
 st.markdown("---")
 
-# Admin Panel
+# Sidebar for login/logout
 with st.sidebar:
-    st.markdown("### 📊 Admin Panel")
-    
-    if st.button("View All Submissions", use_container_width=True):
-        st.session_state.admin_mode = True
-        st.rerun()
-    
-    if st.session_state.admin_mode:
-        st.success("✅ Admin View Active")
-        if st.button("← Back to Registration", use_container_width=True):
-            st.session_state.admin_mode = False
+    if st.session_state.logged_in:
+        # User is logged in - show admin options
+        st.markdown(f"### 👤 {st.session_state.username}")
+        
+        if st.button("📊 View Submissions", use_container_width=True):
+            st.session_state.admin_mode = True
             st.rerun()
+        
+        if st.button("🔒 Logout", use_container_width=True):
+            logout()
+        
+        # Change password
+        with st.expander("Change Password"):
+            with st.form("change_password_form"):
+                old_pwd = st.text_input("Current Password", type="password")
+                new_pwd = st.text_input("New Password", type="password")
+                confirm_pwd = st.text_input("Confirm New Password", type="password")
+                
+                if st.form_submit_button("Update Password"):
+                    if new_pwd != confirm_pwd:
+                        st.error("New passwords don't match!")
+                    elif len(new_pwd) < 6:
+                        st.error("Password must be at least 6 characters")
+                    else:
+                        if change_admin_password(st.session_state.username, old_pwd, new_pwd):
+                            st.success("Password updated successfully!")
+                        else:
+                            st.error("Failed to update password. Check current password.")
+        
+        st.markdown("---")
+        st.caption(f"Logged in: {st.session_state.username}")
+    else:
+        # Not logged in - show login form
+        show_login_form()
+        
+        # Only show "View as Guest" if login was attempted and failed
+        if st.session_state.login_attempted:
+            if st.button("Continue as Guest", use_container_width=True):
+                st.session_state.login_attempted = False
+                st.rerun()
 
-if st.session_state.admin_mode:
-    # ADMIN VIEW
-    st.header("📊 All Station Submissions")
+# Main content area
+if st.session_state.admin_mode and st.session_state.logged_in:
+    # ADMIN DASHBOARD
+    st.header("📊 Admin Dashboard")
     
-    if st.button("🔄 Refresh Data", key="refresh_admin"):
-        st.rerun()
-    
+    # Quick stats
     stations = get_all_stations()
     
     if stations:
@@ -290,38 +493,109 @@ if st.session_state.admin_mode:
             axis=1
         )
         
-        st.dataframe(
-            df[['ID', 'Name', 'Owner', 'Phone', 'Coordinates', 'Accuracy', 'Time', 'Status']],
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
+        # Stats
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Submissions", len(df))
+            st.metric("Total Stations", len(df))
         with col2:
             pending = len(df[df['Status'] == 'pending'])
             st.metric("Pending", pending)
         with col3:
+            approved = len(df[df['Status'] == 'approved'])
+            st.metric("Approved", approved)
+        with col4:
             latest = df['Time'].iloc[0] if len(df) > 0 else "None"
             st.metric("Latest", latest)
         
-        if st.button("📥 Export to CSV", use_container_width=True):
-            csv = df.to_csv(index=False)
-            b64 = base64.b64encode(csv.encode()).decode()
-            href = f'<a href="data:file/csv;base64,{b64}" download="stations.csv">Download CSV</a>'
-            st.markdown(href, unsafe_allow_html=True)
+        st.markdown("---")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_status = st.selectbox(
+                "Filter by Status",
+                ["All", "pending", "approved", "rejected"]
+            )
+        with col2:
+            search_term = st.text_input("Search (Name/ID/Owner)")
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if filter_status != "All":
+            filtered_df = filtered_df[filtered_df['Status'] == filter_status]
+        
+        if search_term:
+            search_term = search_term.lower()
+            filtered_df = filtered_df[
+                filtered_df['ID'].str.lower().str.contains(search_term) |
+                filtered_df['Name'].str.lower().str.contains(search_term) |
+                filtered_df['Owner'].str.lower().str.contains(search_term) |
+                filtered_df['Phone'].str.contains(search_term)
+            ]
+        
+        # Display data
+        st.subheader(f"Stations ({len(filtered_df)})")
+        
+        for _, row in filtered_df.iterrows():
+            with st.expander(f"{row['ID']} - {row['Name']} ({row['Status']})"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Owner:** {row['Owner']}")
+                    st.write(f"**Phone:** {row['Phone']}")
+                    st.write(f"**Coordinates:** {row['Coordinates']}")
+                    st.write(f"**Accuracy:** ±{row['Accuracy']}m")
+                with col2:
+                    st.write(f"**Time:** {row['Time']}")
+                    st.write(f"**Status:** {row['Status']}")
+                    
+                    # Status update
+                    new_status = st.selectbox(
+                        "Update Status",
+                        ["pending", "approved", "rejected"],
+                        index=["pending", "approved", "rejected"].index(row['Status']),
+                        key=f"status_{row['ID']}"
+                    )
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("Update", key=f"update_{row['ID']}"):
+                            if update_station_status(row['ID'], new_status):
+                                st.success("Status updated!")
+                                st.rerun()
+                    with col_btn2:
+                        if st.button("Delete", key=f"delete_{row['ID']}"):
+                            if delete_station(row['ID']):
+                                st.success("Station deleted!")
+                                st.rerun()
+        
+        # Export
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Refresh Data", use_container_width=True):
+                st.rerun()
+        with col2:
+            if st.button("📥 Export to CSV", use_container_width=True):
+                csv = filtered_df.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="stations.csv">Download CSV</a>'
+                st.markdown(href, unsafe_allow_html=True)
     
     else:
-        st.info("No submissions yet.")
+        st.info("No station submissions yet.")
     
-    if st.button("← Back to Registration"):
+    # Back to registration button
+    if st.button("← Back to Registration", use_container_width=True):
         st.session_state.admin_mode = False
         st.rerun()
 
+elif st.session_state.admin_mode and not st.session_state.logged_in:
+    # Redirect to login
+    st.warning("⚠️ Please login to access admin dashboard")
+    show_login_form()
+
 else:
-    # REGISTRATION FLOW
+    # REGISTRATION FLOW (Public access)
     if st.session_state.station_saved:
         # COMPLETION SCREEN
         st.balloons()
@@ -330,23 +604,29 @@ else:
         
         **Station ID:** {st.session_state.station_id}
         
-        Your station has been saved to the database.
-        GPS coordinates are now available in the admin view.
+        Your station has been registered and is pending review.
+        Our team will contact you for verification.
         """)
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📊 View in Admin Dashboard", type="primary", use_container_width=True):
-                st.session_state.admin_mode = True
-                st.session_state.station_saved = False
-                st.session_state.station_id = None
-                st.rerun()
-        with col2:
-            if st.button("➕ Register Another Station", use_container_width=True):
+            if st.button("➕ Register Another Station", type="primary", use_container_width=True):
                 st.session_state.station_saved = False
                 st.session_state.station_id = None
                 st.session_state.gps_data = None
                 # Clear browser storage
+                clear_js = """
+                <script>
+                sessionStorage.removeItem('gps_coordinates');
+                </script>
+                """
+                st.components.v1.html(clear_js, height=0)
+                st.rerun()
+        with col2:
+            if st.button("🏠 Return Home", use_container_width=True):
+                st.session_state.station_saved = False
+                st.session_state.station_id = None
+                st.session_state.gps_data = None
                 clear_js = """
                 <script>
                 sessionStorage.removeItem('gps_coordinates');
@@ -375,29 +655,17 @@ else:
         
         # Display GPS component
         gps_html = gps_capture_component()
+        gps_result = html(gps_html, height=300)
         
-        # Create a container for GPS component
-        gps_container = st.container()
-        with gps_container:
-            gps_result = html(gps_html, height=300)
-            
-            # Listen for GPS data from JavaScript
-            if st.experimental_get_query_params().get('gps_data'):
-                try:
-                    gps_data_json = st.experimental_get_query_params()['gps_data'][0]
-                    st.session_state.gps_data = json.loads(gps_data_json)
-                    st.success("GPS coordinates captured!")
-                except:
-                    pass
-        
-        # Check if we have GPS data via message passing
-        if 'gps_data' not in st.session_state or not st.session_state.gps_data:
-            # Try to get from URL params (alternative method)
-            try:
-                # This will be updated by the JavaScript
-                pass
-            except:
-                pass
+        # Handle GPS data from JavaScript
+        try:
+            # This gets populated by the JavaScript message handler
+            if st.session_state.get('gps_data_json'):
+                gps_data = json.loads(st.session_state.gps_data_json)
+                st.session_state.gps_data = gps_data
+                st.session_state.gps_data_json = None  # Clear after processing
+        except:
+            pass
         
         # Show current GPS status
         if st.session_state.gps_data:
@@ -423,11 +691,10 @@ else:
                 phone = st.text_input("Phone Number *", 
                                     placeholder="08012345678")
             
-            # Validation check
+            # Validation
             gps_ready = st.session_state.gps_data is not None
             form_filled = all([station_name, owner_name, phone])
             
-            # Show status
             if not gps_ready:
                 st.warning("⚠️ Please capture GPS location first!")
             elif not form_filled:
@@ -464,12 +731,12 @@ else:
                     
                     st.rerun()
                 else:
-                    st.error("Failed to save to database")
+                    st.error("Failed to save to database. Please try again.")
             elif submitted and not gps_ready:
                 st.error("Please capture GPS location first!")
         
-        # Developer tools for testing
-        with st.expander("🛠️ Developer Tools"):
+        # Developer tools for testing (hidden by default)
+        with st.expander("🛠️ Developer Tools (Testing Only)"):
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("Set Test Lagos GPS"):
@@ -500,32 +767,45 @@ else:
                     st.components.v1.html(clear_js, height=0)
                     st.success("GPS data cleared!")
                     st.rerun()
-            
-            # Show current session state
-            st.write("Current GPS data:", st.session_state.gps_data)
 
 # Footer
 st.markdown("---")
-st.caption("Station GPS Registration • Auto-save to database • Admin view accessible anytime")
+st.caption("""
+Station GPS Registration System • Auto-save GPS coordinates • 
+[Login Required for Admin Access] • © 2024
+""")
 
-# JavaScript to handle message passing (this needs to run after the page loads)
+# JavaScript message handler (must be at the end)
 message_handler = """
 <script>
-// Listen for messages from the iframe
+// Listen for messages from the GPS component
 window.addEventListener('message', function(event) {
-    // Check if the message is from our component
-    if (event.data && event.data.type === 'streamlit:setComponentValue') {
-        // Send to Streamlit via URL parameter
-        const url = new URL(window.location);
-        url.searchParams.set('gps_data', event.data.value);
-        window.history.pushState({}, '', url);
+    // Check if the message contains GPS data
+    if (event.data && event.data.type === 'gps:coordinates') {
+        // Send to Streamlit
+        const data = {
+            gps_data_json: event.data.data
+        };
         
-        // Trigger a rerun
-        setTimeout(() => {
-            window.location.reload();
-        }, 100);
+        // Use Streamlit's setComponentValue
+        window.parent.postMessage({
+            type: 'streamlit:setComponentValue',
+            value: JSON.stringify(data)
+        }, '*');
     }
 });
+
+// Initialize
+window.onload = function() {
+    // Check for saved GPS data
+    const savedGPS = sessionStorage.getItem('gps_coordinates');
+    if (savedGPS) {
+        window.parent.postMessage({
+            type: 'gps:coordinates',
+            data: savedGPS
+        }, '*');
+    }
+};
 </script>
 """
 
